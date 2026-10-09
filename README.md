@@ -1,16 +1,29 @@
-## Physical Model
+##  Project
 
-The simulation models the propagation, diffraction, and interference of a two-dimensional scalar wave through an opaque barrier containing two slits. The wave field evolves according to a discretized wave equation, while the detector measures the time-averaged squared field.
+This the repo for the assignment, I've written the formulas I implemented below in a nice form (courtesy of Claudius Maximus Pro)
 
-### 1. Wave Generation
+## Tech stack
 
-A harmonic source generates a sinusoidal disturbance:
+But first, the tech I used to do this: 
+- Python
+  -  Numpy
+  -  numba ( for parallelization and caching )
+  -  matplotlib ( for the UI , nothing fancy)
+  
 
+Performance on CPU:
+- Very fluid at 30fps, everything is super optimized because we are doing matrix multiplication using numpy.
+
+## Formulas
+
+### Source formula
 $$
 u_s(t)=A(t)\sin(\omega t+\phi_0),
 $$
 
-where $A(t)$ is the source amplitude, $\omega$ is the angular frequency, and $\phi_0$ is the initial phase.
+- $A(t)$ is the source amplitude with respect to time
+- $\omega$ is the angular frequency
+- $\phi_0$ is the initial phase.
 
 The angular frequency and wavenumber are related to the wavelength by
 
@@ -20,23 +33,14 @@ k=\frac{2\pi}{\lambda},
 \omega=ck,
 $$
 
-where $c$ is the propagation speed and $\lambda$ is the wavelength. For a grid with unit spatial spacing and a normalized propagation speed of $c=1$, the time step is $\Delta t=C$, where $C$ is the Courant number.
+### Wave Propagation
 
-The source amplitude is gradually increased to avoid introducing an abrupt initial disturbance:
-
-$$
-A_n=\min\left(1,\frac{n}{100}\right).
-$$
-
-### 2. Wave Propagation
-
-In free space, the continuous scalar wave equation is
+Scalar wave equation ( not the probabilistic one ) 
 
 $$
 \frac{\partial^2 u}{\partial t^2}=c^2\nabla^2u+S(x,y,t),
 $$
 
-where $S$ represents the source and
 
 $$
 \nabla^2u=
@@ -44,7 +48,7 @@ $$
 +\frac{\partial^2u}{\partial y^2}.
 $$
 
-For a uniform square grid, the discrete spatial Laplacian is
+For a grid ( which is just a matrix ), we use: 
 
 $$
 L_{i,j}^{n}=
@@ -52,8 +56,8 @@ u_{i+1,j}^{n}+u_{i-1,j}^{n}
 +u_{i,j+1}^{n}+u_{i,j-1}^{n}
 -4u_{i,j}^{n}.
 $$
+> Also called the discrete laplacian 
 
-Using a centered finite-difference approximation in time, the undamped update equation becomes
 
 $$
 u_{i,j}^{n+1}
@@ -67,15 +71,13 @@ $$
 C=\frac{c\Delta t}{\Delta}.
 $$
 
-For the standard two-dimensional scheme on a square grid, the usual stability condition is
+is the Courant number.
+[See more about Courant](https://en.wikipedia.org/wiki/Richard_Courant)
 
-$$
-C\leq\frac{1}{\sqrt{2}}.
-$$
+### Boundaries
 
-### 3. Absorbing Boundaries
-
-To reduce artificial reflections from the edges of the computational domain, the simulation introduces spatially varying damping:
+To reduce artificial reflections from the edges of the computational domain, we basically place a big sponge on the sides and in the field itself to simulate
+the slight dampening of waves.
 
 $$
 \frac{\partial^2u}{\partial t^2}
@@ -97,9 +99,9 @@ u_{i,j}^{n+1}={}&
 \end{aligned}
 $$
 
-### 4. The Double-Slit Barrier
+### The Double-Slits
 
-An opaque barrier blocks the field everywhere except at the slit openings. This is represented by a binary mask:
+It's just a mask
 
 $$
 M(x,y)=
@@ -109,17 +111,12 @@ M(x,y)=
 \end{cases}
 $$
 
-The allowed field is
-
-$$
-u_{\mathrm{allowed}}(x,y,t)=M(x,y)u(x,y,t).
-$$
-
-The slit width and separation determine the geometry of the openings. When the incident wave reaches the barrier, the portions passing through the slits continue propagating and diffract into the region beyond the barrier.
 
 The slits are not treated as independent artificial sources. Their outgoing waves emerge from the numerical propagation of the incident field through the openings.
 
-### 5. Superposition and Interference
+> Really, the wall is just a mask where the wave cannot propagate forward.
+
+### Superposition and Interference
 
 Because the scalar wave equation is linear, the total field is the sum of the contributions from the two slits:
 
@@ -164,11 +161,11 @@ $$
 d\sin\theta=\left(m+\frac12\right)\lambda,
 $$
 
-where $m$ is an integer. These conditions assume coherent illumination and the far-field approximation.
+where $m$ is an integer.
 
-### 6. Intensity Measurement
+### Intensity
 
-The detector measures a quantity proportional to the time-averaged squared wave field:
+The detector measures a quantity proportional to the time-averaged squared wave field (Just so it's normalized and you could see the cool patterns) : 
 
 $$
 I(x,y)\propto\left\langle u(x,y,t)^2\right\rangle_t.
@@ -184,9 +181,9 @@ I&\propto\left\langle(u_1+u_2)^2\right\rangle\\
 \end{aligned}
 $$
 
-The cross term $2\langle u_1u_2\rangle$ produces interference. Therefore, the fields must be added before calculating intensity; adding the individual intensities would remove the interference term.
+The cross term $2\langle u_1u_2\rangle$ produces interference.
 
-The simulation averages the squared field over time and across a finite number of detector columns. It uses an exponential running average:
+The simulation averages the squared field over time and across a finite number of detector columns ( See `config.py` ). It uses an exponential running average:
 
 $$
 I_i^{n+1}
@@ -194,19 +191,17 @@ I_i^{n+1}
 \frac{\overline{u_i^2}^{\,n+1}-I_i^n}{N},
 $$
 
-where $\overline{u_i^2}$ is the spatial average across the detector columns and $N$ controls the averaging rate.
 
-### 7. Coherence
+### Coherence
 
-For coherent illumination, the phase relationship between waves remains approximately stable, producing a stationary interference pattern.
-
-The simulation can also introduce random-walk phase fluctuations:
+The simulation can also add a bit of realism ( i.e noise to the patterns) by making the waves incoherent.
+So we change the phase to be
 
 $$
 \phi_n=\omega\Delta t\,n+\phi_0+\eta_n,
 $$
 
-with
+and
 
 $$
 \eta_n=\eta_{n-1}+\sigma\xi_n,
@@ -214,9 +209,15 @@ $$
 \xi_n\sim\mathcal{N}(0,1).
 $$
 
-These fluctuations model a source with a changing phase. Time averaging can reduce the visibility of the fringes when the phase varies sufficiently during the observation period.
 
-### 8. Fraunhofer Diffraction Reference
+These fluctuations model a source with a changing phase. 
+
+### Fraunhofer Diffraction Reference
+
+Very cool stuff overhere.
+
+[See more about Fraunhofer](https://en.wikipedia.org/wiki/Joseph_von_Fraunhofer)
+He literally invented the spectroscope and even put the cool fringes in a formula. 
 
 In the far-field regime, the complex field at observation angle $\theta$ is proportional to the Fourier transform of the field across the aperture:
 
@@ -246,36 +247,8 @@ $$
 r(y')=\sqrt{L_s^2+(y'-y_s)^2}.
 $$
 
-Here, $L_s$ is the source-to-aperture distance and $y_s$ is the source's vertical position. The factor $1/\sqrt{r}$ models the amplitude decay of a two-dimensional cylindrical wave.
-
-For two identical slits of width $a$, separated by distance $d$ and illuminated by a coherent plane wave, the ideal Fraunhofer intensity is
-
-$$
-I(\theta)=I_{\max}
-\cos^2\left(\frac{\pi d\sin\theta}{\lambda}\right)
-\operatorname{sinc}^2\left(\frac{\pi a\sin\theta}{\lambda}\right),
-$$
-
-where
-
-$$
-\operatorname{sinc}(z)=\frac{\sin z}{z}.
-$$
-
-The cosine-squared factor describes interference between the slits, while the sinc-squared factor describes single-slit diffraction.
-
-The numerical reference additionally corrects the wavenumber for the finite-difference grid's numerical dispersion. For dimensionless grid wavenumber $K$, propagation angle $\theta$, and Courant number $C$, the discrete dispersion relation is
-
-$$
-\sin^2\left(\frac{\omega\Delta t}{2}\right)
-=C^2\left[
-\sin^2\left(\frac{K\cos\theta}{2}\right)
-+\sin^2\left(\frac{K\sin\theta}{2}\right)
-\right].
-$$
-
-Solving this relation for each observation angle makes the reference more consistent with the numerical propagation scheme.
-
 ### Summary
 
 The interference pattern arises from the physical superposition of waves passing through the two openings. The numerical wave equation propagates the field, the barrier imposes the slit geometry, and the detector measures the time-averaged squared total field. The Fraunhofer reference provides an independent far-field comparison, with corrections for the grid's numerical dispersion.
+
+
