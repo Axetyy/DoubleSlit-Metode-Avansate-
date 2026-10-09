@@ -155,8 +155,6 @@ refresh_static()
 def make_slider(rect, label, lo, hi, init, step):
     return Slider(fig.add_axes(rect), label, lo, hi, valinit=init, valstep=step)
 
-
-# Original UI positioning preserved
 X1, X2, W = 0.30, 0.72, 0.20
 s_lam = make_slider([X1, 0.22, W, 0.03], "wavelength (nm)", 400, 700, p.wavelength_nm, 0.1)
 s_n = make_slider([X1, 0.17, W, 0.03], "# slits", 1, 7, p.n_slits, 1)
