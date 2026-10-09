@@ -1,21 +1,23 @@
 from dataclasses import dataclass
 
 
+
 @dataclass
 class Params:
     x_src: int = 60
     x_wall: int = 150
     x_det: int = 480
-
+    
     nx: int = 1000
-    ny: int = 400
+    ny: int = 560
+
+    view_ny: int = 400
 
     wall_thickness: int = 4
     sponge: int = 40
 
     courant: float = 0.5
 
-    
     wavelength: float = 12.0
     n_slits: int = 2
     slit_width: float = 10.0

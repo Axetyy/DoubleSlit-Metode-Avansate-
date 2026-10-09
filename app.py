@@ -13,34 +13,67 @@ p = Params()
 sim = WaveSim(p)
 sampler = ParticleSampler(p.ny, p.x_det)
 state = {"paused": False, "scale": 1.0}
+
+view_start = (p.ny - p.view_ny) // 2
+view_end = view_start + p.view_ny
+view_slice = slice(view_start, view_end)
+
+screen_rows = np.arange(view_start, view_end)
+
 screen_arrival_step = int(np.ceil(
     (p.x_det - p.x_src) / p.courant
 ))
-screen_pixel_size_mm = 2 * p.screen_half_height_mm / p.ny
-screen_rows = np.arange(p.ny)
+
+screen_pixel_size_mm = (
+    2 * p.screen_half_height_mm / p.view_ny
+)
+
 screen_y_mm = (
-    (np.arange(p.ny) + 0.5) * screen_pixel_size_mm
+    (np.arange(p.view_ny) + 0.5) * screen_pixel_size_mm
     - p.screen_half_height_mm
 )
+
+SCREEN_SCALE = p.detector_oversampling
+
+high_res_y = np.arange(p.view_ny)
+high_res_y_hi = (
+    (np.arange(p.view_ny * SCREEN_SCALE) + 0.5)
+    / SCREEN_SCALE - 0.5
+)
+
 fig = plt.figure(figsize=(10.5, 8.2))
-gs = GridSpec(1, 3, width_ratios=[4, 0.3, 1.1], left=0.05, right=0.98, top=0.95,
-              bottom=0.32, wspace=0.03)
+gs = GridSpec(
+    1, 3, width_ratios=[4, 0.3, 1.1],
+    left=0.05, right=0.98, top=0.95, bottom=0.32, wspace=0.03
+)
+
 ax_f = fig.add_subplot(gs[0])
 ax_s = fig.add_subplot(gs[1])
 ax_p = fig.add_subplot(gs[2])
 
-im = ax_f.imshow(sim.u, origin="lower", cmap="coolwarm", vmin=-1, vmax=1,
-                 interpolation="nearest", aspect="auto")
-wall_im = ax_f.imshow(np.zeros((p.ny, p.nx, 4), np.uint8), origin="lower",
-                      interpolation="nearest", aspect="auto")
+
+im = ax_f.imshow(
+    sim.u[view_slice, :],
+    origin="lower",
+    cmap="coolwarm",
+    vmin=-1,
+    vmax=1,
+    interpolation="nearest",
+    aspect="auto",
+)
+wall_im = ax_f.imshow(
+    np.zeros((p.view_ny, p.nx, 4), np.uint8),
+    origin="lower",
+    interpolation="nearest",
+    aspect="auto",
+)
 src_pts, = ax_f.plot([], [], "g.", ms=3)
 detector_line = ax_f.axvline(p.x_det, color="k", lw=2)
 hit_sc = ax_f.scatter([], [], s=4, c="darkorange", edgecolors="none", visible=False)
 status = ax_f.text(0.02, 0.96, "", transform=ax_f.transAxes, fontsize=9,
                    bbox=dict(fc="white", ec="none", alpha=0.8))
-SCREEN_SCALE = p.detector_oversampling
 
-screen_rgb = np.zeros((p.ny * SCREEN_SCALE,1,3),dtype=np.float32)
+screen_rgb = np.zeros((p.view_ny * SCREEN_SCALE, 1, 3), dtype=np.float32)
 
 strip = ax_s.imshow(
     screen_rgb,
@@ -66,13 +99,14 @@ ax_s.set_xlim(0, 1)
 ax_s.set_ylabel("position (mm)", fontsize=8)
 ax_s.set_title("detector", fontsize=8)
 ax_s.set_ylim(-p.screen_half_height_mm, p.screen_half_height_mm)
+
 ax_f.set_autoscale_on(False)
 ax_f.set_xlim(-0.5, p.x_det + 8.5)
 ax_f.set_title("qualitative wave field (grid units)", fontsize=9)
 ax_f.set_xlabel("x (cells)")
 ax_f.set_ylabel("y (grid cells)")
 
-line_I, = ax_p.plot([], [], "b", lw=1.4, label="wave intensity", visible=False)
+line_I, = ax_p.plot([], [], "b", lw=1.4, label="wave intensity", visible=True)
 line_H, = ax_p.plot([], [], "k", lw=1, drawstyle="steps-mid", label="cumulative detections", visible=False)
 line_F, = ax_p.plot([], [], "r--", lw=1.2, label="grid Fraunhofer approximation", visible=True)
 ax_p.set_autoscale_on(False)
@@ -88,15 +122,29 @@ ax_p.legend(handles=[line_I, line_F], loc="upper right", fontsize=7)
 def refresh_static():
     global fraunhofer_profile
 
-    rgba = np.zeros((p.ny, p.nx, 4), np.uint8)
-    rgba[~sim.slit_open, p.x_wall:p.x_wall + p.wall_thickness] = (25, 25, 25, 255)
+    rgba = np.zeros((p.view_ny, p.nx, 4), np.uint8)
+
+    visible_slits = sim.slit_open[view_slice]
+    rgba[
+        ~visible_slits,
+        p.x_wall:p.x_wall + p.wall_thickness
+    ] = (25, 25, 25, 255)
+
     wall_im.set_data(rgba)
-    src_pts.set_data(np.full(len(sim.src_y), p.x_src), sim.src_y)
+
+    src_visible = sim.src_y - view_start
+    src_visible = src_visible[
+        (src_visible >= 0) & (src_visible < p.view_ny)
+    ]
+    src_pts.set_data(
+        np.full(len(src_visible), p.x_src),
+        src_visible,
+    )
     fraunhofer_profile = fraunhofer(
-        p,
-        screen_rows,
-        sim.slit_open,
-        sim.src_y[0],
+    p,
+    screen_rows,       
+    sim.slit_open,
+    sim.src_y[0],
     )
     line_F.set_data(fraunhofer_profile, screen_y_mm)
 
@@ -108,13 +156,14 @@ def make_slider(rect, label, lo, hi, init, step):
     return Slider(fig.add_axes(rect), label, lo, hi, valinit=init, valstep=step)
 
 
+# Original UI positioning preserved
 X1, X2, W = 0.30, 0.72, 0.20
 s_lam = make_slider([X1, 0.22, W, 0.03], "wavelength (nm)", 400, 700, p.wavelength_nm, 0.1)
 s_n = make_slider([X1, 0.17, W, 0.03], "# slits", 1, 7, p.n_slits, 1)
 s_a = make_slider([X1, 0.12, W, 0.03], "slit width (μm)", 10, 80, p.slit_width_um, 1)
 s_d = make_slider([X1, 0.07, W, 0.03], "slit pitch (μm)", 100, 500, p.slit_spacing_um, 5)
-s_L = make_slider([X2, 0.22, W, 0.03], "screen L (m)", 0.5, 3.5, p.screen_distance_m, 0.1)
-s_ang = make_slider([X2, 0.17, W, 0.03], "incidence (deg)", -5, 5, p.source_angle_deg, 0.1)
+s_L = make_slider([X2, 0.22, W, 0.03], "screen distance (m)", 0.5, 3.5, p.screen_distance_m, 0.1)
+s_ang = make_slider([X2, 0.17, W, 0.03], "incidence (deg)", -30, 30, p.source_angle_deg, 1)
 s_spf = make_slider([X2, 0.12, W, 0.03], "steps/frame", 1, 30, 10, 1)
 s_ppf = make_slider([X2, 0.07, W, 0.03], "mean photons/frame", 1, 100, 10, 1)
 
@@ -135,70 +184,48 @@ def wavelength_to_rgb(wavelength_nm):
     g = np.zeros_like(w)
     b = np.zeros_like(w)
 
-    # 380-440: violet -> blue
     m = (w >= 380) & (w < 440)
-    r[m] = -(w[m] - 440) / (440 - 380)
+    r[m] = -(w[m] - 440) / 60
     g[m] = 0
     b[m] = 1
 
-    # 440-490: blue -> cyan
     m = (w >= 440) & (w < 490)
     r[m] = 0
-    g[m] = (w[m] - 440) / (490 - 440)
+    g[m] = (w[m] - 440) / 50
     b[m] = 1
 
-    # 490-510: cyan -> green
     m = (w >= 490) & (w < 510)
     r[m] = 0
     g[m] = 1
-    b[m] = -(w[m] - 510) / (510 - 490)
+    b[m] = -(w[m] - 510) / 20
 
-    # 510-580: green -> yellow
     m = (w >= 510) & (w < 580)
-    r[m] = (w[m] - 510) / (580 - 510)
+    r[m] = (w[m] - 510) / 70
     g[m] = 1
     b[m] = 0
 
-    # 580-645: yellow -> red
     m = (w >= 580) & (w < 645)
     r[m] = 1
-    g[m] = -(w[m] - 645) / (645 - 580)
+    g[m] = -(w[m] - 645) / 65
     b[m] = 0
 
-    # 645-750: red
     m = (w >= 645) & (w <= 750)
     r[m] = 1
     g[m] = 0
     b[m] = 0
 
-    # Fade near spectrum limits
     factor = np.ones_like(w)
-
     m = (w >= 380) & (w < 420)
-    factor[m] = 0.3 + 0.7 * (
-        (w[m] - 380) / 40
-    )
-
+    factor[m] = 0.3 + 0.7 * ((w[m] - 380) / 40)
     m = (w > 700) & (w <= 750)
-    factor[m] = 0.3 + 0.7 * (
-        (750 - w[m]) / 50
-    )
+    factor[m] = 0.3 + 0.7 * ((750 - w[m]) / 50)
 
-    return np.stack([ r * factor, g * factor, b * factor], axis=-1)
-def high_res_screen(intensity, oversampling=4):
-    ny = len(intensity)
+    return np.stack([r * factor, g * factor, b * factor], axis=-1)
 
-    y = np.arange(ny)
-    y_hi = (
-        (np.arange(ny * oversampling) + 0.5) / oversampling
-        - 0.5
-    )
 
-    return np.interp(
-        y_hi,
-        y,
-        intensity
-    )
+def high_res_screen(intensity):
+    """Interpolates using precalculated grid vectors."""
+    return np.interp(high_res_y_hi, high_res_y, intensity)
 
 
 screen_color = wavelength_to_rgb(p.wavelength_nm)
@@ -219,9 +246,7 @@ def on_param(_=None):
     p.n_slits = int(s_n.val)
     p.slit_width = p.slit_width_um * 0.18
     p.slit_spacing = p.slit_spacing_um * 0.18
-    screen_arrival_step = int(np.ceil(
-        (p.x_det - p.x_src) / p.courant
-    ))
+    screen_arrival_step = int(np.ceil((p.x_det - p.x_src) / p.courant))
     sampler.x_detector = p.x_det
     detector_line.set_xdata([p.x_det, p.x_det])
     ax_f.set_xlim(-0.5, p.x_det + 8.5)
@@ -282,6 +307,7 @@ rb_coh.on_clicked(on_coherence)
 b_reset.on_clicked(on_reset)
 b_pause.on_clicked(on_pause)
 
+
 def update(frame):
     if not state["paused"]:
         for _ in range(int(s_spf.val)):
@@ -289,7 +315,7 @@ def update(frame):
         if p.particle_mode and sim.t_step >= screen_arrival_step:
             sampler.sample(sim.I_det, int(s_ppf.val))
 
-    disp = np.sign(sim.u) * np.sqrt(np.abs(sim.u))
+    disp = np.sign(sim.u[view_slice,:]) * np.sqrt(np.abs(sim.u[view_slice,:]))
     im.set_data(disp)
     if frame % 5 == 0:
         target = max(float(np.percentile(np.abs(disp[::2, p.x_src + 20::2]), 99.5)), 0.02)
@@ -299,7 +325,7 @@ def update(frame):
     arrived = sim.t_step >= screen_arrival_step
 
     if p.particle_mode:
-        counts = sampler.hist
+        counts = sampler.hist[view_slice]
         max_count = float(counts.max())
         total_count = float(counts.sum())
         line_H.set_data(counts, screen_y_mm)
@@ -309,18 +335,23 @@ def update(frame):
         )
         line_F.set_data(expected_counts, screen_y_mm)
         ax_p.set_xlim(0, max(1, max(max_count, float(expected_counts.max())) * 1.1))
-        hit_sc.set_offsets(sampler.recent)
+        visible_recent = sampler.recent[
+            (sampler.recent[:, 1] >= view_start - 0.5)
+            & (sampler.recent[:, 1] < view_end - 0.5)
+        ].copy()
+        visible_recent[:, 1] -= view_start
+        hit_sc.set_offsets(visible_recent)
         screen_hit_sc.set_offsets(
             np.column_stack(
                 (
-                    np.full(len(sampler.recent), 0.5),
-                    (sampler.recent[:, 1] + 0.5)
+                    np.full(len(visible_recent), 0.5),
+                    (visible_recent[:, 1] + 0.5)
                     * screen_pixel_size_mm
                     - p.screen_half_height_mm,
                 )
             )
         )
-        screen_hits = high_res_screen(counts, p.detector_oversampling)
+        screen_hits = high_res_screen(counts)
         strip.set_data(screen_hits[:, None])
         strip.set_clim(0, max(1, max_count))
         if sim.t_step < screen_arrival_step:
@@ -330,11 +361,12 @@ def update(frame):
         else:
             status.set_text(f"{int(sampler.hist.sum())} detections")
     else:
-        detector_peak = float(sim.I_det.max())
-        wave_profile = sim.I_det / max(detector_peak, 1e-12)
+        detector_intensity = sim.I_det[view_slice]
+        detector_peak = float(detector_intensity.max())
+        wave_profile = detector_intensity / max(detector_peak, 1e-12)
         line_I.set_data(wave_profile, screen_y_mm)
         line_I.set_visible(arrived and detector_peak > 1e-12)
-        screen_I = high_res_screen(wave_profile, p.detector_oversampling)
+        screen_I = high_res_screen(wave_profile)
         screen_image = screen_I[:, None, None] * screen_color[None, None, :]
         strip.set_data(screen_image)
         line_H.set_visible(False)
@@ -346,5 +378,6 @@ def update(frame):
             status.set_text("")
 
 
-anim = FuncAnimation(fig, update, interval=15, cache_frame_data=False)
+anim = FuncAnimation(fig, update, interval=30, cache_frame_data=False)
+
 plt.show()
