@@ -1,6 +1,16 @@
+"""Grid-based scalar wave propagation and a matching Fraunhofer reference.
+
+CPU-optimised version: the whole time step (stencil, damping, wall mask,
+source injection, detector averaging) is fused into one parallel Numba
+kernel. Physics and numerics are identical to the NumPy version, only the
+order of float32 operations differs (~1e-7 relative).
+"""
 
 import os
 
+# Must be set BEFORE numba is imported. 'workqueue' avoids the OpenMP/TBB
+# runtime clashes (numpy/MKL + matplotlib) that cause access violations on
+# Windows. Set WAVESIM_PARALLEL=0 to run the kernel single-threaded.
 os.environ.setdefault("NUMBA_THREADING_LAYER", "workqueue")
 PARALLEL = os.environ.get("WAVESIM_PARALLEL", "1") != "0"
 
@@ -10,14 +20,17 @@ from numba import njit, prange
 from config import Params
 
 
+# ---------------------------------------------------------------------------
+# Numba kernels
+# ---------------------------------------------------------------------------
+
 @njit(parallel=PARALLEL, cache=False)
 def _one_step(u, up, un, c_next, c_prev, C2, sy, sx, sv, x0, x1, I_det, avg):
-    """
+    """One leapfrog step, fused.
 
     un = mask * ( dn * (2u + C2*lap(u)) - dn*dp * up + source )
     with c_next = dn*mask and c_prev = dn*dp*mask precomputed.
     Border cells have lap == 0, exactly as in the original implementation.
-    Its just DP
     """
     ny, nx = u.shape
     two = np.float32(2.0)
@@ -42,7 +55,9 @@ def _one_step(u, up, un, c_next, c_prev, C2, sy, sx, sv, x0, x1, I_det, avg):
                 un[i, j] = c_next[i, j] * (two * u[i, j] + lap) - c_prev[i, j] * up[i, j]
 
         if i == sy:
-            un[i, sx] += sv  
+            un[i, sx] += sv  # sv already multiplied by the wall mask at the source cell
+
+        # detector: running mean of u^2 over the last columns, float64 accumulator
         s = 0.0
         for j in range(x0, x1 + 1):
             v = un[i, j]
@@ -52,6 +67,7 @@ def _one_step(u, up, un, c_next, c_prev, C2, sy, sx, sv, x0, x1, I_det, avg):
 
 @njit(cache=False)
 def _run_steps(u, up, un, c_next, c_prev, C2, sy, sx, sv_arr, x0, x1, I_det, avg):
+    """Run len(sv_arr) steps, rotating the three buffers. Returns (u, u_prev, u_next)."""
     for k in range(sv_arr.shape[0]):
         _one_step(u, up, un, c_next, c_prev, C2, sy, sx, sv_arr[k], x0, x1, I_det, avg)
         u, up, un = un, u, up
@@ -59,6 +75,7 @@ def _run_steps(u, up, un, c_next, c_prev, C2, sy, sx, sv_arr, x0, x1, I_det, avg
 
 
 def _warmup():
+    """Trigger JIT compilation (or cache load) on a tiny dummy problem."""
     a = np.zeros((8, 8), np.float32)
     b = np.zeros_like(a)
     c = np.zeros_like(a)
@@ -69,7 +86,13 @@ def _warmup():
 
 
 _WARMED = False
-class WaveSim:
+
+
+# ---------------------------------------------------------------------------
+# Simulation
+# ---------------------------------------------------------------------------
+
+class WaveSimulator:
     AVG_STEPS = 480
 
     def __init__(self, p: Params):
@@ -145,6 +168,8 @@ class WaveSim:
 
         self.C2 = np.float32(p.courant ** 2)
 
+        # Fused per-cell coefficients (algebraically identical to the original
+        # damping_prev / damping_next / wall_mask sequence).
         self.c_next = np.ascontiguousarray(
             self.damping_next * self.wall_mask, dtype=np.float32
         )
@@ -171,6 +196,7 @@ class WaveSim:
         self.rebuild(fresh=True)
 
     def step_n(self, n=1):
+        """Advance n time steps in a single compiled call."""
         if n <= 0:
             return
 
@@ -180,6 +206,8 @@ class WaveSim:
         phase = self.omega * p.courant * t + self.phase_offset[0]
 
         if not p.coherent:
+            # Random-walk phase noise: cumulative sum reproduces the
+            # sequential per-step update exactly.
             noise = self.phase_noise[0] + np.cumsum(0.1 * self.rng.standard_normal(n))
             self.phase_noise[0] = noise[-1]
             phase = phase + noise
@@ -188,6 +216,9 @@ class WaveSim:
         sv = (amplitude * np.sin(phase) * self.src_mask).astype(np.float32)
 
         x0 = max(0, p.x_det - p.detector_width + 1)
+
+        # Numba does no bounds checking, so an out-of-range index would be a
+        # silent memory corruption / access violation. Fail loudly instead.
         ny, nx = self.u.shape
         if not (0 <= int(self.src_y[0]) < ny and 0 <= p.x_src < nx and 0 <= p.x_det < nx):
             raise ValueError(
@@ -210,50 +241,6 @@ class WaveSim:
 
     def step(self):
         self.step_n(1)
+    def detector_image(self):
+        return self.I_det
 
-def _numerical_wavenumber(p, angle):
-    omega_dt = 2 * np.pi * p.courant / p.wavelength
-    target = np.sin(omega_dt / 2) ** 2 / p.courant ** 2
-    angle = np.asarray(angle, dtype=float)
-    low = np.zeros_like(angle, dtype=float)
-    high = np.full_like(angle, np.pi, dtype=float)
-
-    for _ in range(32):
-        wave_number = (low + high) / 2
-        dispersion = (
-            np.sin(wave_number * np.cos(angle) / 2) ** 2
-            + np.sin(wave_number * np.sin(angle) / 2) ** 2
-        )
-        below_target = dispersion < target
-        low = np.where(below_target, wave_number, low)
-        high = np.where(below_target, high, wave_number)
-
-    return (low + high) / 2
-
-
-def fraunhofer(p, detector_rows, slit_open, source_row):
-    center = p.ny / 2
-    detector_y = np.asarray(detector_rows, dtype=float) - center
-
-    idx = np.flatnonzero(np.asarray(slit_open, dtype=bool))
-    aperture_y = idx.astype(float) - center
-
-    source_x = p.x_wall + p.wall_thickness / 2 - p.x_src
-    screen_x = p.x_det - p.x_wall - p.wall_thickness / 2
-    source_y = float(source_row) - center
-
-    incident_angle = np.arctan2(aperture_y - source_y, source_x)
-    incident_k = _numerical_wavenumber(p, incident_angle)
-    source_distance = np.hypot(source_x, aperture_y - source_y)
-    aperture_field = np.exp(1j * incident_k * source_distance) / np.sqrt(source_distance)
-
-    sin_theta = detector_y / np.hypot(detector_y, screen_x)
-    detector_angle = np.arctan2(detector_y, screen_x)
-    detector_k = _numerical_wavenumber(p, detector_angle)
-    propagation = np.exp(
-        -1j * detector_k[:, None] * sin_theta[:, None] * aperture_y[None, :]
-    )
-    intensity = np.abs(propagation @ aperture_field) ** 2
-
-    peak = float(np.max(intensity)) if intensity.size else 0.0
-    return intensity / peak if peak > 0 else intensity

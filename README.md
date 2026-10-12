@@ -2,6 +2,39 @@
 
 This the repo for the assignment, I've written the formulas I implemented below in a nice form (courtesy of Claudius Maximus Pro)
 
+## Running the simulation
+
+Run `python main.py` to open the original Matplotlib experiment UI with its
+parameter sliders, detector profile, and Fraunhofer estimate. Select **3D** and
+**GPU** to open the PyVista wavefront viewer; 2D GPU and 3D CPU remain in the
+original app. Slider settings, wave/particle mode, and coherence are passed to
+the 3D viewer when it opens. The viewer shows thinner, lower-opacity 3D
+wavefronts and compares the detector profile against the Fraunhofer estimate.
+Its controls also tune wavelength, slit count/width/pitch/height, screen
+distance, incidence angle, source distance, simulation steps, and detection
+rate. The circular-apertures toggle uses slit width as the diameter.
+The 3D solver uses a wider absorbing sponge near the edges of the displayed
+160-by-160 y/z field of view, while the hard simulation boundaries remain
+hidden beyond the view. This gives outgoing waves more room to decay before
+they can reflect back into the experiment.
+PyVista and PyTorch are required for the 3D GPU viewer; install PyVista with
+`python -m pip install pyvista` and use a suitable CUDA-enabled PyTorch build.
+
+### Code map
+
+- `main.py` - interactive controls, plots, and animation.
+- `physics_numba.py` - 2D CPU wave solver.
+- `physics_torch.py` - 2D PyTorch solver (CPU or CUDA GPU).
+- `physics3d.py` - 3D wave solver (Numba CPU or PyTorch CPU/CUDA).
+- `vistaengine.py` - live PyVista/VTK 3D wavefront and detector viewer.
+- `sampling.py` and `sampling3d.py` - particle/detection sampling.
+- `reference.py` - Fraunhofer reference patterns for comparison.
+- `config.py` - simulation parameters.
+
+The physics modules are alternative backends or dimensions used by the same
+simulation UI, not separate simulations to launch individually. `build/`,
+`dist/`, and `__pycache__/` contain generated files.
+
 ## Tech stack
 
 But first, the tech I used to do this: 
@@ -250,5 +283,3 @@ $$
 ### Summary
 
 The interference pattern arises from the physical superposition of waves passing through the two openings. The numerical wave equation propagates the field, the barrier imposes the slit geometry, and the detector measures the time-averaged squared total field. The Fraunhofer reference provides an independent far-field comparison, with corrections for the grid's numerical dispersion.
-
-
