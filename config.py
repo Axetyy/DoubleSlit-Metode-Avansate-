@@ -47,12 +47,6 @@ class Params:
     slit_height:float = 0.0
     
 def params_3d()->Params:
-    """Parameters for the 3D simulation.
- 
-    The grid is 400 x 192 x 192. Wider y/z sponge layers absorb outgoing
-    waves near the edges of the 160 x 160 region shown by the 3D viewer, with
-    the hard boundaries kept outside the visible crop.
-    """
     p = Params(
         x_src=30,
         x_wall=75,

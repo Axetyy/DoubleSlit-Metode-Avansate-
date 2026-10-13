@@ -1,4 +1,3 @@
-"""Interactive double-slit wave and detector simulation."""
 import os
 import subprocess
 import sys
@@ -69,7 +68,7 @@ ax_f3 = fig.add_subplot(gs[0], projection="3d")
 ax_f3.set_visible(False)
 POS2 = {"f": ax_f.get_position().frozen(), "s": ax_s.get_position().frozen(),
         "p": ax_p.get_position().frozen()}
-# 2D field view
+
 im = ax_f.imshow(np.zeros((p2.ny, p2.nx)), origin="lower", cmap="coolwarm", vmin=-1, vmax=1,
                  interpolation="nearest", aspect="auto")
 wall_im = ax_f.imshow(np.zeros((p2.ny, p2.nx, 4), np.uint8), origin="lower",
@@ -79,11 +78,8 @@ detector_line = ax_f.axvline(p2.x_det, color="k", lw=2)
 hit_sc = ax_f.scatter([], [], s=4, c="darkorange", edgecolors="none", visible=False)
 status = ax_f.text(0.02, 0.96, "", transform=ax_f.transAxes, fontsize=9,
                    bbox=dict(fc="white", ec="none", alpha=0.8))
-ax_f.set_autoscale_on(False)
-ax_f.set_xlabel("x (cells)")
-ax_f.set_ylabel("y (grid cells)")
- 
-# 3D field view (z-mid-plane slice, wall with real slits, detector plane)
+ax_f.set_autoscale_on(False) 
+
 status3 = ax_f3.text2D(0.02, 0.96, "", transform=ax_f3.transAxes, fontsize=9,
                        bbox=dict(fc="white", ec="none", alpha=0.8))
 src3d, = ax_f3.plot([0], [0], [0], "g.", ms=8)
@@ -102,7 +98,7 @@ screen_hit_sc = ax_s.scatter([], [], s=10, c="darkorange", edgecolors="white",
 ax_s.set_ylabel("position (mm)", fontsize=8)
  
 # profile
-line_I, = ax_p.plot([], [], "b", lw=1.4, label="wave intensity", visible=False)
+line_I, = ax_p.plot([], [], "b", lw=1.4, label="wave intensity", visible=True)
 line_H, = ax_p.plot([], [], "k", lw=1, drawstyle="steps-mid", label="cumulative detections",
                     visible=False)
 line_F, = ax_p.plot([], [], "r--", lw=1.2, label="grid Fraunhofer approximation", visible=True)
@@ -196,7 +192,7 @@ screen_color = wavelength_to_rgb(p.wavelength_nm)
  
  
 def runs(mask):
-    """Split a boolean array into (start, stop, value) runs."""
+
     out, start = [], 0
     for i in range(1, len(mask) + 1):
         if i == len(mask) or mask[i] != mask[start]:
